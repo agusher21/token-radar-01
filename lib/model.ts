@@ -14,7 +14,9 @@
 // itself supplies:
 //
 //   comparable  = median(mcap_usd / tvl_usd) over live-token protocols in the same category
-//                 (at least 3 of them, else the global median over all live-token protocols)
+//                 (at least 3 of them); a thinner category keeps its own median but shrunk
+//                 25% toward the global median, and a category with no live example at all
+//                 falls back to the global median over all live-token protocols
 //   multiple    = clamp(0.5 * comparable + 0.5 * global_median, 0.05, 0.80)
 //   growth      = clamp(change_7d, -50, 150) per cent
 //   growthMult  = 1 + (growth / 100) * 0.6
@@ -22,10 +24,12 @@
 //   implied     = max(1, round(tvl_usd * multiple * growthMult * maturity))
 //
 // The multiple is what the market already pays for a dollar of TVL in that line of business,
-// read off the snapshot's own live-token protocols; a category with too few live examples falls
-// back to the global median. No protocol name is ever special-cased: the same function scores
-// every row, and the dashboard shows each row's own multiple, growth and maturity so the number
-// can be checked by hand.
+// read off the snapshot's own live-token protocols; a category with too few live examples no
+// longer falls back to the global median outright -- one or two live protocols are still a
+// signal, just a thin one, so the model trusts their median only three quarters of the way
+// and pulls the rest toward the global median. No protocol name is ever special-cased: the
+// same function scores every row, and the dashboard shows each row's own multiple, growth and
+// maturity so the number can be checked by hand.
 
 /** The snapshot's protocol entry: exactly the ten fields the sealed input carries. */
 export interface SnapshotProtocol {
@@ -63,6 +67,7 @@ export interface ModelConstants {
   multiple_cap: number;
   category_blend: number;
   min_category_sample: number;
+  depth_shrink: number;
 }
 
 export const MODEL: ModelConstants = {
@@ -77,6 +82,7 @@ export const MODEL: ModelConstants = {
   multiple_cap: 0.8,
   category_blend: 0.5,
   min_category_sample: 3,
+  depth_shrink: 0.25,
 };
 
 /** The model's version label: the dashboard names it. */
@@ -264,8 +270,17 @@ export function comparableMultiple(
   model: ModelConstants,
 ): number {
   const entry = category !== null ? comps.byCategory.get(category) : undefined;
-  // A category with too few live examples is not a comparable: fall back to the global median.
-  const sample = entry !== undefined && entry.count >= model.min_category_sample ? entry.median : comps.global;
+  // A category with no live example at all falls back to the global median. A thin
+  // category (fewer than min_category_sample live examples) keeps its own median but
+  // shrunk depth_shrink of the way toward the global one: one or two live protocols
+  // are a signal, just a thin one, so the model trusts them only most of the way.
+  let sample = comps.global;
+  if (entry !== undefined) {
+    sample =
+      entry.count >= model.min_category_sample
+        ? entry.median
+        : comps.global + (1 - model.depth_shrink) * (entry.median - comps.global);
+  }
   const base = model.category_blend * sample + (1 - model.category_blend) * comps.global;
   return Math.min(model.multiple_cap, Math.max(model.multiple_floor, base));
 }

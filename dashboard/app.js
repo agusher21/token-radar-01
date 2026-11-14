@@ -1,7 +1,7 @@
 // Token Radar's dashboard. It reads window.RADAR (written beside dashboard/ by main.ts) and
 // renders the ranked board, a filterable table, a per-protocol detail drawer with the model's own
 // inputs and the protocol's farm plan, and the comparables the model was read from. No network:
-// every byte it shows is in data.js.
+// every byte it shows is in data.js. The drawer's farm plan can be copied as plain text.
 //
 // The model in one function: the page recomputes a row from the snapshot figures and checks the
 // number board.json carries, so the page's code and the board's data are visibly the same
@@ -124,6 +124,33 @@
       { text: "Before you withdraw, open the protocol's own points or rewards page and claim only from the link it publishes.", cost: 'no fee to check, and never pay to claim', time: '10 minutes' },
       { text: 'Write the wallet, the dates and every transaction in a farm log so you can repeat the position or unwind it.', cost: 'nothing but the log', time: '5 minutes' }
     ].map(stepText);
+  }
+
+  // Copy a farm plan as plain text: the clipboard API where it exists, a hidden textarea
+  // and execCommand where it does not. No network, no new dependency.
+  function copyText(text, button) {
+    function done() {
+      var label = button.textContent;
+      button.textContent = 'Copied';
+      setTimeout(function () { button.textContent = label; }, 1500);
+    }
+    function fallback() {
+      var area = document.createElement('textarea');
+      area.value = text;
+      area.setAttribute('readonly', '');
+      area.style.position = 'fixed';
+      area.style.opacity = '0';
+      document.body.appendChild(area);
+      area.select();
+      try { document.execCommand('copy'); } catch (e) { /* the list stays selectable */ }
+      document.body.removeChild(area);
+      done();
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, fallback);
+    } else {
+      fallback();
+    }
   }
 
   // --- state -------------------------------------------------------------------------------
@@ -340,7 +367,7 @@
         document.createElement('br'),
         document.createTextNode('  maturity = ' + m.maturity_floor + ' + min(age_days, ' + m.maturity_days + ') / ' + m.maturity_days + ' x ' + m.maturity_range + '   (age unknown: ' + m.unknown_age_days + ' days)')
       ),
-      el('p', { class: 'sub', text: 'The comparable is what the market already pays for a dollar of TVL in that category, read off the snapshot\u2019s own live-token protocols (a category with fewer than ' + m.min_category_sample + ' live examples falls back to the global median). Age is the time since the protocol was first listed, the best record of how long it has run with no token. Wrapped, staked and bridged products are excluded from the ranking, and live-token protocols are set aside with their market caps shown.' }),
+      el('p', { class: 'sub', text: 'The comparable is what the market already pays for a dollar of TVL in that category, read off the snapshot\u2019s own live-token protocols (a category with fewer than ' + m.min_category_sample + ' live examples keeps its own median shrunk ' + Math.round(m.depth_shrink * 100) + '% toward the global median, and a category with no live example at all falls back to the global median). Age is the time since the protocol was first listed, the best record of how long it has run with no token. Wrapped, staked and bridged products are excluded from the ranking, and live-token protocols are set aside with their market caps shown.' }),
       el('div', { class: 'comps' }, top.map(function (c) {
         return el('div', null, el('span', { text: c.category + ' (' + c.live_count + ')' }), el('b', { text: fmtMult(c.median_multiple) }));
       }))
@@ -358,6 +385,10 @@
     dialog.textContent = '';
     var steps = farmSteps(row);
     var recomputed = impliedOf(row, DATA.model);
+    var planText = row.name + ' farm plan (Token Radar, snapshot ' + DATA.as_of + ')\n' +
+      steps.map(function (s, i) { return (i + 1) + '. ' + s; }).join('\n');
+    var copyButton = el('button', { class: 'button', type: 'button', text: 'Copy farm plan' });
+    copyButton.addEventListener('click', function () { copyText(planText, copyButton); });
     dialog.appendChild(el('div', { class: 'detail-head' },
       el('div', null,
         el('span', { class: 'brand-name', text: 'Rank ' + row.rank + ' of ' + DATA.board_size }),
@@ -386,7 +417,8 @@
         var action = at >= 0 ? s.slice(0, at) : s;
         var tail = at >= 0 ? s.slice(at + 1) : '';
         return el('li', null, el('b', { text: action }), el('span', { class: 'cost', text: tail }));
-      }))
+      })),
+      copyButton
     ));
     if (typeof dialog.showModal === 'function') {
       if (!dialog.open) dialog.showModal();
