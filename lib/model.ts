@@ -29,7 +29,9 @@
 // signal, just a thin one, so the model trusts their median only three quarters of the way
 // and pulls the rest toward the global median. No protocol name is ever special-cased: the
 // same function scores every row, and the dashboard shows each row's own multiple, growth and
-// maturity so the number can be checked by hand.
+// maturity so the number can be checked by hand. Each row also carries the count of live-token
+// protocols behind its multiple, so a thin category's number can be weighed against the evidence
+// that set it: a multiple read off two live protocols is a thinner claim than one read off twenty.
 
 /** The snapshot's protocol entry: exactly the ten fields the sealed input carries. */
 export interface SnapshotProtocol {
@@ -116,6 +118,8 @@ export interface BoardRow {
   implied_value_usd: number;
   model: {
     comparable_multiple: number;
+    // How many live-token protocols set this row's multiple: 0 when the row fell back to the global median.
+    comparable_count: number;
     growth_pct: number;
     growth_multiplier: number;
     maturity_multiplier: number;
@@ -138,6 +142,8 @@ export interface RadarRow {
   age_days: number | null;
   implied_value_usd: number;
   comparable_multiple: number;
+  // The live-token protocols whose mcap/TVL set this row's comparable: 0 on a global-median fallback.
+  comparable_count: number;
   growth_multiplier: number;
   maturity_multiplier: number;
 }
@@ -285,6 +291,20 @@ export function comparableMultiple(
   return Math.min(model.multiple_cap, Math.max(model.multiple_floor, base));
 }
 
+/** How many live-token protocols set a category's comparable multiple: the live count of the
+ * category itself, or 0 when the category has no live example and the row falls back to the
+ * global median. A thin category still counts its own one or two live protocols: the median
+ * they set is the row's, only shrunk toward the global one, so the count is theirs and the
+ * reader can weigh a multiple against the evidence behind it. */
+export function comparableCount(
+  category: string | null,
+  comps: { byCategory: Map<string, { median: number; count: number }>; global: number },
+): number {
+  if (category === null) return 0;
+  const entry = comps.byCategory.get(category);
+  return entry === undefined ? 0 : entry.count;
+}
+
 /** The three multipliers and the implied value one protocol gets under `model`. */
 export function impliedValue(
   protocol: SnapshotProtocol,
@@ -321,8 +341,9 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
 
   const scored = [...chosen.values()].map((p) => {
     const multiple = comparableMultiple(p.category, comps, model);
+    const depth = comparableCount(p.category, comps);
     const { implied, growthPct, growthMult, maturityMult, age } = impliedValue(p, snapshot.as_of, multiple, model);
-    return { p, implied, multiple, growthPct, growthMult, maturityMult, age };
+    return { p, implied, multiple, depth, growthPct, growthMult, maturityMult, age };
   });
   scored.sort((a, b) => b.implied - a.implied || (a.p.slug < b.p.slug ? -1 : a.p.slug > b.p.slug ? 1 : 0));
   return scored.map((s, i) => ({
@@ -344,6 +365,8 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
       // Full precision here: the dashboard recomputes the row from this multiple, so a
       // rounded copy would make the page disagree with board.json by a few hundred thousand.
       comparable_multiple: s.multiple,
+      // The count behind the multiple: how many live protocols the category median rests on.
+      comparable_count: s.depth,
       growth_pct: s.growthPct,
       growth_multiplier: round4(s.growthMult),
       maturity_multiplier: round4(s.maturityMult),
@@ -487,6 +510,7 @@ export function radarRow(row: BoardRow): RadarRow {
     age_days: row.age_days,
     implied_value_usd: row.implied_value_usd,
     comparable_multiple: row.model.comparable_multiple,
+    comparable_count: row.model.comparable_count,
     growth_multiplier: row.model.growth_multiplier,
     maturity_multiplier: row.model.maturity_multiplier,
   };

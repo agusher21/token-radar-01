@@ -146,3 +146,11 @@ tbody tr[data-selected="true"] { background: rgba(240, 180, 41, 0.09); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
 }
+
+/* Compare panel: two picks above a side-by-side table, below the board. */
+.compare { margin-top: var(--s4); padding: var(--s5); display: grid; gap: var(--s3); }
+.compare-picks { display: flex; flex-wrap: wrap; gap: var(--s3); align-items: end; }
+.compare-picks .field select { min-width: 260px; }
+.compare-table td.win { color: var(--accent); font-weight: 600; }
+.compare-table th:nth-child(3), .compare-table td:nth-child(3) { text-align: right; }
+.compare-verdict { margin-top: var(--s3); }

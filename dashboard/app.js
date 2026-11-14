@@ -374,6 +374,121 @@
     );
   }
 
+  // --- compare two protocols: the same figures, side by side --------------------------------
+  // The picks live outside the board's own state: the board's search, filter and sort keep
+  // working while the comparison below it follows only these two choices. Defaults are the
+  // board's top two rows, so the panel says something useful before anyone touches it.
+  var compareState = { first: DATA.rows[0] ? DATA.rows[0].slug : null, second: DATA.rows[1] ? DATA.rows[1].slug : null };
+
+  function compareRowBySlug(slug) {
+    var found = DATA.rows.filter(function (r) { return r.slug === slug; });
+    return found.length > 0 ? found[0] : null;
+  }
+
+  function compareOptionLabel(row) {
+    return 'Rank ' + row.rank + ' — ' + row.name;
+  }
+
+  function comparePick(which) {
+    var current = which === 'first' ? compareState.first : compareState.second;
+    var select = el('select', { 'aria-label': which === 'first' ? 'First protocol to compare' : 'Second protocol to compare' },
+      DATA.rows.map(function (r) {
+        return el('option', { value: r.slug, text: compareOptionLabel(r), selected: r.slug === current ? 'selected' : null });
+      })
+    );
+    select.addEventListener('change', function () {
+      if (which === 'first') compareState.first = select.value;
+      else compareState.second = select.value;
+      render();
+    });
+    return el('div', { class: 'field' },
+      el('label', { text: which === 'first' ? 'First protocol' : 'Second protocol' }),
+      select
+    );
+  }
+
+  function compareCell(text, wins) {
+    return el('td', { class: 'num' + (wins ? ' win' : ''), text: text });
+  }
+
+  // One entry per figure: the two readings and which side leads. A tie marks neither side,
+  // so a row where both plans run six steps, or both multiples match, stays honest.
+  function compareEntries(a, b) {
+    var aSteps = farmSteps(a).length;
+    var bSteps = farmSteps(b).length;
+    var aGrowth = a.change_7d === null || a.change_7d === undefined ? 0 : a.change_7d;
+    var bGrowth = b.change_7d === null || b.change_7d === undefined ? 0 : b.change_7d;
+    var aAge = a.age_days === null || a.age_days === undefined ? 0 : a.age_days;
+    var bAge = b.age_days === null || b.age_days === undefined ? 0 : b.age_days;
+    return [
+      { label: 'TVL', a: fmtUsd(a.tvl_usd), b: fmtUsd(b.tvl_usd), aWins: a.tvl_usd > b.tvl_usd, bWins: b.tvl_usd > a.tvl_usd },
+      { label: 'Comparable multiple', a: fmtMult(a.comparable_multiple), b: fmtMult(b.comparable_multiple), aWins: a.comparable_multiple > b.comparable_multiple, bWins: b.comparable_multiple > a.comparable_multiple },
+      { label: 'Live protocols behind the multiple', a: String(a.comparable_count), b: String(b.comparable_count), aWins: a.comparable_count > b.comparable_count, bWins: b.comparable_count > a.comparable_count },
+      { label: 'Seven-day change', a: fmtPct(a.change_7d), b: fmtPct(b.change_7d), aWins: aGrowth > bGrowth, bWins: bGrowth > aGrowth },
+      { label: 'Age with no token', a: fmtAge(a.age_days), b: fmtAge(b.age_days), aWins: aAge > bAge, bWins: bAge > aAge },
+      { label: 'Maturity multiplier', a: fmtMult(a.maturity_multiplier), b: fmtMult(b.maturity_multiplier), aWins: a.maturity_multiplier > b.maturity_multiplier, bWins: b.maturity_multiplier > a.maturity_multiplier },
+      { label: 'Implied value', a: fmtUsd(a.implied_value_usd), b: fmtUsd(b.implied_value_usd), aWins: a.implied_value_usd > b.implied_value_usd, bWins: b.implied_value_usd > a.implied_value_usd },
+      { label: 'Farm plan steps', a: String(aSteps), b: String(bSteps), aWins: aSteps > bSteps, bWins: bSteps > aSteps }
+    ];
+  }
+
+  // The verdict names the leader and the gap, then checks the multiple: a leader can win on
+  // size while the trailer's market pays more per dollar of TVL, and that is worth saying,
+  // because the two protocols are then winning for different reasons.
+  function compareVerdict(a, b) {
+    if (a.implied_value_usd === b.implied_value_usd) return 'Both protocols carry the same implied value: the model ranks them only by name from here.';
+    var leader = a.implied_value_usd > b.implied_value_usd ? a : b;
+    var trailer = leader === a ? b : a;
+    var ratio = (leader.implied_value_usd / Math.max(1, trailer.implied_value_usd)).toFixed(1);
+    var perDollar = leader.comparable_multiple < trailer.comparable_multiple
+      ? ' The trailer earns its place differently: the market pays more per dollar of its TVL (' + fmtMult(trailer.comparable_multiple) + ' against ' + fmtMult(leader.comparable_multiple) + '), so its smaller implied value is a smaller base, not a weaker multiple.'
+      : '';
+    return leader.name + ' leads on implied value at ' + fmtUsd(leader.implied_value_usd) + ', about ' + ratio + 'x ' + trailer.name + ' at ' + fmtUsd(trailer.implied_value_usd) + '.' + perDollar;
+  }
+
+  function comparePanel() {
+    var a = compareRowBySlug(compareState.first);
+    var b = compareRowBySlug(compareState.second);
+    var body;
+    if (!a || !b) {
+      body = el('p', { class: 'sub', text: 'Pick two protocols above to compare them.' });
+    } else if (a.slug === b.slug) {
+      body = el('p', { class: 'sub', text: 'Pick two different protocols: comparing a protocol with itself says nothing.' });
+    } else {
+      var entries = compareEntries(a, b);
+      var tbody = el('tbody');
+      entries.forEach(function (e) {
+        tbody.appendChild(el('tr', null,
+          el('td', { text: e.label }),
+          compareCell(e.a, e.aWins),
+          compareCell(e.b, e.bWins)
+        ));
+      });
+      body = el('div', null,
+        el('div', { class: 'table-wrap' },
+          el('table', { class: 'compare-table' },
+            el('thead', null, el('tr', null,
+              el('th', { scope: 'col', text: 'Figure' }),
+              el('th', { scope: 'col', text: 'Rank ' + a.rank + ' · ' + a.name }),
+              el('th', { scope: 'col', text: 'Rank ' + b.rank + ' · ' + b.name })
+            )),
+            tbody
+          )
+        ),
+        el('p', { class: 'sub compare-verdict', text: compareVerdict(a, b) })
+      );
+    }
+    return el('section', { class: 'panel compare' },
+      el('h2', { text: 'Compare two protocols' }),
+      el('p', { class: 'sub', text: 'The same model figures, side by side: the multiple, the live protocols behind it, growth, age and the implied value each one carries. The larger figure in each row is marked.' }),
+      el('div', { class: 'compare-picks' },
+        comparePick('first'),
+        comparePick('second')
+      ),
+      body
+    );
+  }
+
   var dialog = el('dialog', { class: 'detail', id: 'detail', 'aria-labelledby': 'detail-title' });
   dialog.addEventListener('close', function () { state.selected = null; writeHash(); });
 
@@ -436,6 +551,7 @@
     shell.appendChild(controls());
     shell.appendChild(state.tab === 'pre-token' ? boardTable() : liveTable());
     if (state.tab === 'pre-token') shell.appendChild(modelPanel());
+    if (state.tab === 'pre-token') shell.appendChild(comparePanel());
     shell.appendChild(el('p', { class: 'foot', text: 'Implied values are this radar\u2019s own model claim, never a price. A protocol \u201crecords no token\u201d is DefiLlama\u2019s record, not proof it has none. Snapshot ' + DATA.as_of + '.' }));
     app.appendChild(shell);
     app.setAttribute('aria-busy', 'false');
